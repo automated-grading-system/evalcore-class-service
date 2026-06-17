@@ -1,0 +1,15 @@
+bin/
+obj/
+TestResults/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.rsuser
+*.nupkg
+coverage/
+.env
+.env.*
+!.env.example
+appsettings.Local.json
