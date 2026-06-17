@@ -1,0 +1,104 @@
+name: Class AI PR Docs
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: class-ai-docs-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ai-docs:
+    runs-on: ubuntu-latest
+    env:
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Skip when OpenCode is not configured
+        if: env.OPENCODE_API_KEY == ''
+        run: echo "OPENCODE_API_KEY is not configured. Skipping AI PR docs."
+
+      - name: Checkout
+        if: env.OPENCODE_API_KEY != ''
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        if: env.OPENCODE_API_KEY != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install OpenCode
+        if: env.OPENCODE_API_KEY != ''
+        run: npm install --global opencode-ai
+
+      - name: Build PR documentation prompt
+        if: env.OPENCODE_API_KEY != ''
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          git diff --stat "origin/${{ github.base_ref }}...HEAD" > /tmp/pr-diff.txt
+          git diff --unified=80 "origin/${{ github.base_ref }}...HEAD" >> /tmp/pr-diff.txt
+
+          cat > /tmp/docs-prompt.md <<'PROMPT'
+          Hãy tạo hoặc cập nhật mô tả Pull Request bằng tiếng Việt.
+
+          Product: Automated Grading System
+          Service: evalcore-class-service
+          Stack: .NET 8, ASP.NET Core Web API, EF Core, PostgreSQL, JWT, MinIO, RabbitMQ, Docker, GitHub Actions
+
+          Ngữ cảnh service:
+          - Class Service chỉ phụ trách class management, class membership, lab metadata, presigned upload/download URLs cho lab assets, và lab domain events.
+          - Không mô tả identity/login, submission, evaluation, notification hoặc frontend như tính năng của service này.
+          - Không nói backend nhận multipart upload hoặc lưu file local.
+          - Không phát minh tính năng hoàn thành nếu diff không thể hiện.
+
+          Hãy viết mô tả PR theo cấu trúc:
+          ## Tóm tắt
+          ## Thay đổi chính
+          ## Kiểm thử
+          ## Ghi chú / rủi ro
+
+          Tiêu đề PR:
+          ${{ github.event.pull_request.title }}
+
+          Mô tả PR hiện tại:
+          ${{ github.event.pull_request.body }}
+
+          Diff:
+          PROMPT
+          cat /tmp/pr-diff.txt >> /tmp/docs-prompt.md
+
+      - name: Generate PR description
+        if: env.OPENCODE_API_KEY != ''
+        run: |
+          if ! opencode run "$(cat /tmp/docs-prompt.md)" > /tmp/pr-description.md; then
+            cat > /tmp/pr-description.md <<'FALLBACK'
+          ## Tóm tắt
+          OpenCode không chạy thành công trong workflow này.
+
+          ## Thay đổi chính
+          Chưa tạo được mô tả tự động.
+
+          ## Kiểm thử
+          Xem log workflow để biết chi tiết.
+
+          ## Ghi chú / rủi ro
+          Cần cập nhật mô tả PR thủ công hoặc cấu hình lại OPENCODE_API_KEY.
+          FALLBACK
+          fi
+
+      - name: Update PR description
+        if: env.OPENCODE_API_KEY != ''
+        run: gh pr edit "${{ github.event.pull_request.number }}" --body-file /tmp/pr-description.md

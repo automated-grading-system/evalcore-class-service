@@ -1,0 +1,131 @@
+name: Class AI Code Review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: class-ai-code-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ai-code-review:
+    runs-on: ubuntu-latest
+    env:
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Skip when OpenCode is not configured
+        if: env.OPENCODE_API_KEY == ''
+        run: echo "OPENCODE_API_KEY is not configured. Skipping AI code review."
+
+      - name: Checkout
+        if: env.OPENCODE_API_KEY != ''
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        if: env.OPENCODE_API_KEY != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install OpenCode
+        if: env.OPENCODE_API_KEY != ''
+        run: npm install --global opencode-ai
+
+      - name: Build review prompt
+        if: env.OPENCODE_API_KEY != ''
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          git diff --stat "origin/${{ github.base_ref }}...HEAD" > /tmp/pr-diff.txt
+          git diff --unified=80 "origin/${{ github.base_ref }}...HEAD" >> /tmp/pr-diff.txt
+
+          cat > /tmp/review-prompt.md <<'PROMPT'
+          Bạn là reviewer backend cho Automated Grading System.
+
+          Product: Automated Grading System
+          Service: evalcore-class-service
+          Stack: .NET 8, ASP.NET Core Web API, EF Core, PostgreSQL, JWT, MinIO, RabbitMQ, Docker, GitHub Actions
+
+          Service responsibility:
+          - class management
+          - class membership
+          - lab metadata
+          - lab asset presigned upload URLs
+          - lab events
+
+          Service must not:
+          - implement identity/login
+          - implement submission/evaluation logic
+          - upload large files through backend
+          - call internal backend services directly from frontend
+          - bypass API response envelope
+
+          Review language: Vietnamese.
+
+          Review format:
+          ## AI Code Review
+
+          ### Summary
+
+          ### What looks good
+
+          ### Suggestions
+
+          ### Issues
+
+          ### Class-service checklist
+
+          ### Overall Assessment
+
+          Overall assessment must be one of:
+          - Approve
+          - Comment
+          - Request Changes
+
+          Chỉ nhận xét dựa trên diff. Không suy đoán tính năng đã hoàn thành nếu diff không chứng minh.
+
+          Diff:
+          PROMPT
+          cat /tmp/pr-diff.txt >> /tmp/review-prompt.md
+
+      - name: Run OpenCode review
+        if: env.OPENCODE_API_KEY != ''
+        run: |
+          if ! opencode run "$(cat /tmp/review-prompt.md)" > /tmp/ai-review.md; then
+            cat > /tmp/ai-review.md <<'FALLBACK'
+          ## AI Code Review
+
+          ### Summary
+          Không thể chạy OpenCode trong workflow này.
+
+          ### What looks good
+          Chưa có đánh giá tự động.
+
+          ### Suggestions
+          Kiểm tra log workflow để xử lý lỗi OpenCode.
+
+          ### Issues
+          Không có kết luận tự động.
+
+          ### Class-service checklist
+          Chưa thể xác minh tự động checklist của Class Service.
+
+          ### Overall Assessment
+          Comment
+          FALLBACK
+          fi
+
+      - name: Publish review comment
+        if: env.OPENCODE_API_KEY != ''
+        run: gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/ai-review.md
