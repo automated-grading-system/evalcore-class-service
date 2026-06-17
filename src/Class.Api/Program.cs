@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using System.Text.Json;
+using Class.Api;
 using Class.Api.Auth;
 using Class.Api.Middleware;
 using Class.Application;
@@ -137,6 +138,8 @@ if (builder.Environment.IsDevelopment())
 }
 
 var app = builder.Build();
+
+await app.ApplyDatabaseMigrationsAsync();
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 

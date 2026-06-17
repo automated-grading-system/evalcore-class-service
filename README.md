@@ -166,6 +166,46 @@ Endpoints:
 
 Swagger is enabled in Development and supports Bearer token authentication.
 
+## Runtime Migrations
+
+Class Service can automatically apply EF Core migrations on startup without requiring `dotnet ef database update` to be run manually.
+
+### How it works
+
+On startup, `Class.Api` calls `Database.MigrateAsync()` using the runtime EF Core APIs. No `dotnet-ef` CLI tool is required inside the container.
+
+### Control
+
+The behavior is controlled by the `AUTO_APPLY_MIGRATIONS` environment variable:
+
+```env
+AUTO_APPLY_MIGRATIONS=true
+```
+
+| Scenario | Behavior |
+|---|---|
+| `ASPNETCORE_ENVIRONMENT=Development` + variable absent | Migrations applied (default `true`) |
+| `ASPNETCORE_ENVIRONMENT=Production` + variable absent | Migrations skipped (default `false`) |
+| `AUTO_APPLY_MIGRATIONS=true` | Migrations always applied |
+| `AUTO_APPLY_MIGRATIONS=false` | Migrations always skipped |
+
+### Retry
+
+If Postgres is not yet ready at startup (common in Docker Compose), migration will retry up to 5 times with a 2-second delay between attempts. Transient connection errors are retried; permanent migration errors abort startup immediately so container logs clearly reveal the problem.
+
+### Docker Compose
+
+The full `prn232-ops` Docker stack relies on this for the local tester/dev flow:
+
+```bash
+docker compose --profile app down -v --remove-orphans
+docker compose --profile app up -d
+# class-service starts, detects Development env, applies classroom migrations automatically
+make smoke-app
+```
+
+No manual SQL scripts or extra migration containers are needed.
+
 ## Docker
 
 Build:
